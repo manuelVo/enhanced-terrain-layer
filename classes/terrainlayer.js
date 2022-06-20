@@ -232,63 +232,39 @@ export class TerrainLayer extends PlaceablesLayer {
         return this.listTokenTerrain({ list: this.listMeasuredTerrain({ list: this.listTerrain(options), ...options }), ...options })
     }
 
+    calculateCombinedCost(terrian, options = {}) {
+        let cost = null;
+        for (const terrainInfo of terrain) {
+            if (cost === null || terrainInfo.cost > cost) {
+                cost = terrainInfo.cost;
+            }
+        }
+        return cost ?? 1;
+    }
+
     costWithTerrain(pts, terrain, options = {}) {
-        pts = pts instanceof Array ? pts : [pts];
+        const multipleResults = pts instanceof Array;
+        pts = multipleResults ? pts : [pts];
 
         const hx = (canvas.grid.type == CONST.GRID_TYPES.GRIDLESS || options.ignoreGrid === true ? 0 : canvas.grid.w / 2);
         const hy = (canvas.grid.type == CONST.GRID_TYPES.GRIDLESS || options.ignoreGrid === true ? 0 : canvas.grid.h / 2);
 
-        let calculate = options.calculate || 'maximum';
-        let calculateFn;
-        if (typeof calculate == 'function')
-            calculateFn = calculate;
-        else {
-            switch (calculate) {
-                case 'maximum':
-                    calculateFn = function (cost, total) { return Math.max(cost, total); }; break;
-                case 'additive':
-                    calculateFn = function (cost, total) { return cost + total; }; break;
-                default:
-                    throw new Error(i18n("EnhancedTerrainLayer.ErrorCalculate"));
-            }
-        }
-
-        const details = [];
-        let total = 0;
+        const costs = [];
         for (const pt of pts) {
-            let cost = null;
             const [gx, gy] = (canvas.grid.type == CONST.GRID_TYPES.GRIDLESS || options.ignoreGrid === true ? [pt.x, pt.y] : canvas.grid.grid.getPixelsFromGridPosition(pt.y, pt.x));
 
             const tx = (gx + hx);
             const ty = (gy + hy);
 
-            for (const terrainInfo of terrain) {
-                const testX = tx - terrainInfo.object.data.x;
-                const testY = ty - terrainInfo.object.data.y;
-
-                if (!terrainInfo.shape.contains(testX, testY))
-                    continue;
-
-                const terraincost = terrainInfo.cost;
-                if (typeof calculateFn == 'function')
-                    cost = calculateFn(terraincost, cost, terrainInfo.object);
-                
-                const detail = {
-                    cost: terrainInfo.rawCost,
-                    object: terrainInfo.object,
-                    reduce: terrainInfo.reducers,
-                    total: cost,
-                };
-                details.push(detail);
-            }
-
-            total += (cost != undefined ? cost : 1);
+            terrain = terrain.filter(t => t.shape.contains(tx - t.object.data.x, ty - t.object.data.y));
+            const cost = this.calculateCombinedCost(terrain, options);
+            costs.push(cost);
         }
 
-        if (options.verbose === true)
-            return { cost: total, details: details, calculate: calculate };
+        if (multipleResults)
+            return costs;
         else
-            return total;
+            return costs[0];
     }
 
     cost(pts, options = {}) {
@@ -296,12 +272,12 @@ export class TerrainLayer extends PlaceablesLayer {
         return this.costWithTerrain(pts, terrain, options);
     }
 
-    terrainFromGrid(x, y) {
+    terrainFromGrid(x, y, options={}) {
         let [gx, gy] = canvas.grid.grid.getPixelsFromGridPosition(y, x);
-        return this.terrainFromPixels(gx, gy);
+        return this.terrainFromPixels(gx, gy, options);
     }
 
-    terrainFromPixels(x, y) {
+    terrainFromPixels(x, y, options={}) {
         const hx = (x + (canvas.grid.w / 2));
         const hy = (y + (canvas.grid.h / 2));
 
@@ -310,6 +286,11 @@ export class TerrainLayer extends PlaceablesLayer {
             const testY = hy - t.data.y;
             return t.shape.contains(testX, testY);
         });
+
+        const elevation = this.calcElevationFromOptions(options);
+        if (elevation !== null) {
+            terrains = terrains.filter(t => elevation >= t.bottom || elevation <= t.top)
+        }
 
         return terrains;
     }
